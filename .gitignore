@@ -1,0 +1,31 @@
+# Virtual environments
+venv/
+.env/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data & generated artifacts
+datasets/
+preprocessed/
+outputs/
+
+# Logs & checkpoints
+*.log
+*.ckpt
+*.pth
+*.pt
+
+# Editors & OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Notebooks cache & temp
+.ipynb_checkpoints/
+tmp/
+cache/

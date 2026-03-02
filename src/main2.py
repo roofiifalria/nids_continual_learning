@@ -335,6 +335,10 @@ def main():
     # Misc
     ap.add_argument("--seed", type=int, default=42)
 
+    # TAMBAHAN BARU: Opsi untuk memuat model lama
+    ap.add_argument("--load_checkpoint", type=str, default=None, 
+                    help="Path ke file .pt model lama untuk dilanjutkan trainingnya")
+
     args = ap.parse_args()
     set_global_seed(args.seed)
 
@@ -437,8 +441,20 @@ def main():
         grad_clip=1.0,
         class_weight=None
     ))
-    print("[main] pretraining MLP on seen classes only ...")
-    clf.fit(X_seen, y_seen, epochs=args.mlp_epochs, batch_size=args.mlp_batch, verbose=1)
+    if args.load_checkpoint:
+        print(f"[main] MELANJUTKAN training dari model: {args.load_checkpoint}")
+        # Kita load bobot dari model sebelumnya
+        clf.load(args.load_checkpoint)
+        
+        # Opsional: Jika melanjutkan training, kita mungkin tidak mau pretrain 
+        # dari nol lagi, tapi melakukan fine-tuning ringan
+        print("[main] Fine-tuning model lama dengan data baru (seen classes)...")
+        clf.fit(X_seen, y_seen, epochs=args.mlp_epochs, batch_size=args.mlp_batch, verbose=1)
+    else:
+        # Perilaku lama (Training dari nol)
+        print("[main] pretraining MLP on seen classes only ...")
+        clf.fit(X_seen, y_seen, epochs=args.mlp_epochs, batch_size=args.mlp_batch, verbose=1)
+    # --- SELESAI UBAHAN ---
     pre_eval = clf.evaluate(X_test, y_test)
     print(f"[main] Pretrain eval: loss={pre_eval['loss']:.4f} acc={pre_eval['acc']:.4f} f1={pre_eval['f1']:.4f}")
     clf.save(os.path.join(ckpt_dir, "mlp_pretrain.pt"))

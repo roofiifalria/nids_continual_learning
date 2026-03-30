@@ -6,7 +6,7 @@ Key properties:
 - Two-pass chunked processing (never loads the whole dataset in RAM):
   1) Scan to compute per-column min/max and mean; collect label counts.
   2) Transform in chunks (numeric coercion -> impute -> min-max scale) and write out.
-- Streaming stratified split without train_test_split (keeps memory tiny).
+- Streaming stratified split (keeps memory tiny).
 - Uses float32 to reduce memory/IO.
 - Supports Parquet output via a persistent ParquetWriter (recommended) or CSV.
 
@@ -53,6 +53,15 @@ ATTACK_MAPPING = {
     "ransomware": "Ransomware", "Shellcode": "Shellcode",
     "Analysis": "Analysis", "Theft": "Theft", "Worms": "Worms"
 }
+
+# --- Ditambahkan sesuai instruksi ---
+GLOBAL_LABEL_DICT = {
+    "Benign": 0, "DDoS": 1, "DoS": 2, "Scanning": 3, "Reconnaissance": 4,
+    "XSS": 5, "Brute Force": 6, "Injection": 7, "Botnet": 8, "Infiltration": 9,
+    "Backdoor": 10, "Exploits": 11, "Fuzzers": 12, "Generic": 13, "MITM": 14,
+    "Ransomware": 15, "Shellcode": 16, "Analysis": 17, "Theft": 18, "Worms": 19
+}
+# --- Akhir tambahan ---
 # --------------------------- End Global Variables ---------------------------
 
 
@@ -222,9 +231,12 @@ def pass2_transform_and_write(
     targets = split_targets(label_counts, test_size)
     rng = np.random.default_rng(random_state)
 
-    # stable class order for mapping
-    classes_sorted = sorted(label_counts.keys())
-    name_to_id = {name: i for i, name in enumerate(classes_sorted)}
+    # --- Perubahan Utama Di Sini ---
+    # Baris lama: classes_sorted = sorted(label_counts.keys())
+    # Baris lama: name_to_id = {name: i for i, name in enumerate(classes_sorted)}
+    # Diganti dengan:
+    name_to_id = GLOBAL_LABEL_DICT
+    # --- Akhir Perubahan Utama ---
 
     # parquet writers (lazy)
     writers = _open_parquet_writers(out_train, out_test) if parquet else None
@@ -299,8 +311,12 @@ def pass2_transform_and_write(
                 writers[key].close()
 
     # save label names (compatible with existing loader)
+    # --- Perubahan Untuk Penyimpanan Label Dict ---
+    # Baris lama: json.dump({k: k for k in classes_sorted}, jf, indent=2)
+    # Diganti dengan:
     with open(os.path.join(save_dir, "label_dict.json"), "w", encoding="utf-8") as jf:
-        json.dump({k: k for k in classes_sorted}, jf, indent=2)
+        json.dump(GLOBAL_LABEL_DICT, jf, indent=2)
+    # --- Akhir Perubahan ---
 
 
 # --------------------------- CLI ---------------------------

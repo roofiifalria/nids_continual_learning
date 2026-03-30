@@ -44,9 +44,10 @@ def build_run_dirs(base: str = "outputs") -> Tuple[str, str]:
 
 
 def detect_pre_dir(root: str) -> str:
+    import os
+    if os.path.exists(os.path.join(root, "train_df.parquet")): return root
     pre = os.path.join(root, "preprocessed")
-    if not os.path.isdir(pre):
-        raise FileNotFoundError(f"Expected folder: {pre}")
+    if not os.path.isdir(pre): raise FileNotFoundError("Expected folder preprocessed")
     return pre
 
 
@@ -278,10 +279,9 @@ def main():
 
     # Data / experiment
     ap.add_argument("--data_root", type=str, default=".", help="Project root that contains 'preprocessed/'")
-    ap.add_argument("--target_class", type=str, required=True,
-                    help="Class name to treat as UNSEEN for MLP pretrain (GAN trains on it)")
+    ap.add_argument("--target_class", type=str, default="All")
     # Sampling budgets (keep these modest to avoid OOM)
-    ap.add_argument("--seen_cap_total", type=int, default=400_000,
+    ap.add_argument("--seen_cap_total", type=int, default=40000,
                     help="Max rows to load for seen-class pretrain pool (total across all seen classes)")
     ap.add_argument("--seen_cap_per_class", type=int, default=50_000,
                     help="Per-class cap inside the seen pool; applied after initial load")
@@ -311,6 +311,10 @@ def main():
     ap.add_argument("--replay_cap", type=int, default=20000, help="capacity per class")
     ap.add_argument("--seed_replay_per_class", type=int, default=2000,
                     help="initial real samples per seen class to seed buffer")
+    # --- TAMBAHAN ARG ---
+    ap.add_argument("--load_buffer", type=str, default=None)
+    ap.add_argument("--save_buffer", type=str, default="buffer.npz")
+    # --- AKHIR TAMBAHAN ---
 
     # Env (hybrid: GAN + Replay)
     ap.add_argument("--max_gen", type=int, default=5, help="per-class max GAN samples per step")
@@ -346,10 +350,13 @@ def main():
     pre_dir = detect_pre_dir(args.data_root)
     train_path, test_path, is_parquet = detect_files(pre_dir)
     name_to_id = load_label_dict(pre_dir)
-    if args.target_class not in name_to_id:
+    if args.target_class == "All":
+        target_id = -1
+    elif args.target_class not in name_to_id:
         raise SystemExit(f"[error] target_class='{args.target_class}' not found. Available (sample): "
                          f"{list(name_to_id.keys())[:10]} ...")
-    target_id = int(name_to_id[args.target_class])
+    else:
+        target_id = int(name_to_id[args.target_class])
     num_classes = len(name_to_id)
 
     # Feature columns (numeric only)
@@ -360,46 +367,42 @@ def main():
     with open(os.path.join(run_dir, "labels.json"), "w", encoding="utf-8") as f:
         json.dump({"name_to_id": name_to_id, "target": args.target_class, "target_id": target_id}, f, indent=2)
 
-    # ----------------------- Stream seen pool -----------------------
-    print("[main] streaming seen-class pool (for MLP pretrain & replay seeding) ...")
+    # Load full df
     if is_parquet:
-        seen_df = stream_sample_parquet(
-            path=train_path,
-            where=f"label!={target_id}",
-            feature_cols=feature_cols,
-            total_cap=args.seen_cap_total,
-        )
+        df = pd.read_parquet(train_path)
     else:
-        seen_df = stream_sample_csv(
-            path=train_path,
-            feature_cols=feature_cols,
-            label_filter=lambda z: int(z) != target_id,
-            total_cap=args.seen_cap_total,
-        )
-    if seen_df.empty:
-        raise SystemExit("[error] seen_df is empty; increase caps or check preprocessing outputs.")
+        df = pd.read_csv(train_path)
 
-    # Optional per-class cap
+    # ----------------------- Split seen and unseen -----------------------
+    if args.target_class == "All":
+        seen_df = df
+        unseen_df = pd.DataFrame(columns=df.columns)
+    else:
+        seen_df = df[df["Attack"] != args.target_class]
+        unseen_df = df[df["Attack"] == args.target_class]
+
+    # Add label column
+    if args.target_class != "All":
+        seen_df = seen_df.copy()
+        unseen_df = unseen_df.copy()
+        seen_df["label"] = seen_df["Attack"].map(name_to_id)
+        unseen_df["label"] = target_id
+    else:
+        seen_df = seen_df.copy()
+        seen_df["label"] = seen_df["Attack"].map(name_to_id)
+        unseen_df = pd.DataFrame(columns=list(df.columns) + ["label"])
+
+    # Apply caps
+    if len(seen_df) > args.seen_cap_total:
+        seen_df = seen_df.sample(n=args.seen_cap_total, random_state=42)
     if args.seen_cap_per_class > 0:
         seen_df = stratify_by_class(seen_df, per_class_cap=args.seen_cap_per_class, feature_cols=feature_cols)
+    if not unseen_df.empty and len(unseen_df) > args.unseen_cap:
+        unseen_df = unseen_df.sample(n=args.unseen_cap, random_state=42)
 
-    # ----------------------- Stream unseen pool -----------------------
-    print("[main] streaming UNSEEN target-class pool (for CGAN training) ...")
-    if is_parquet:
-        unseen_df = stream_sample_parquet(
-            path=train_path,
-            where=f"label=={target_id}",
-            feature_cols=feature_cols,
-            total_cap=args.unseen_cap,
-        )
-    else:
-        unseen_df = stream_sample_csv(
-            path=train_path,
-            feature_cols=feature_cols,
-            label_filter=lambda z: int(z) == target_id,
-            total_cap=args.unseen_cap,
-        )
-    if unseen_df.empty:
+    if seen_df.empty:
+        raise SystemExit("[error] seen_df is empty; increase caps or check preprocessing outputs.")
+    if args.target_class != "All" and unseen_df.empty:
         raise SystemExit("[error] unseen_df is empty; choose a different --target_class or increase --unseen_cap.")
 
     # ----------------------- Stream test (stratified) -----------------------
@@ -472,21 +475,28 @@ def main():
         lr=args.gan_lr,
         seed=args.seed,
     )
-    gan.train(X_unseen, y_unseen, epochs=args.gan_epochs, verbose=True)
+    if not unseen_df.empty:
+        gan.train(X_unseen, y_unseen, epochs=args.gan_epochs, verbose=True)
 
     # ----------------------- Replay buffer (seed with seen only) -----------------------
     print("[main] seeding replay buffer with seen classes ...")
+    # --- PERUBAHAN UTAMA DI SINI ---
     buf = ClassReplayBuffer(n_classes=num_classes, capacity_per_class=args.replay_cap,
                             feature_dim=len(feature_cols), seed=args.seed)
-    if args.seed_replay_per_class > 0:
-        per = int(args.seed_replay_per_class)
-        for c, group in seen_df.groupby("label"):
-            take = min(per, len(group))
-            if take <= 0:
-                continue
-            sample = group.sample(n=take, random_state=args.seed)
-            buf.add(sample[feature_cols].values.astype(np.float32),
-                    sample["label"].values.astype(int))
+    if args.load_buffer:
+        print(f"Loading buffer from {args.load_buffer}")
+        buf.load_npz(args.load_buffer)
+    else:
+        print("Seeding new buffer")
+        if args.seed_replay_per_class > 0:
+            per = int(args.seed_replay_per_class)
+            for c, group in seen_df.groupby("label"):
+                take = min(per, len(group))
+                if take > 0:
+                    sample = group.sample(n=take, random_state=args.seed)
+                    buf.add(sample[feature_cols].values.astype(np.float32),
+                            sample["label"].values.astype(int))
+    # --- AKHIR PERUBAHAN UTAMA ---
 
     # ----------------------- Hybrid Environment -----------------------
     print("[main] building hybrid environment (GAN + Replay) ...")
@@ -531,6 +541,11 @@ def main():
     print("[main] saving artifacts ...")
     agent.save(os.path.join(ckpt_dir, "ppo_agent.pt"))
     clf.save(os.path.join(ckpt_dir, "mlp_final.pt"))
+    
+    # --- TAMBAHAN PENYIMPANAN BUFFER ---
+    buf.save_npz(os.path.join(ckpt_dir, args.save_buffer))
+    # --- AKHIR TAMBAHAN ---
+    
     # logs may be numpy arrays
     with open(os.path.join(run_dir, "logs.json"), "w", encoding="utf-8") as jf:
         json.dump({k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in logs.items()}, jf, indent=2)

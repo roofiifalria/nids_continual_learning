@@ -7,12 +7,16 @@ import numpy as np
 # Tambahkan folder 'src' ke path
 sys.path.append('src')
 
+# --- TAMBAHAN BARU: Import dari visualize.py ---
+from visualize import plot_confusion_matrix
+# --- AKHIR TAMBAHAN ---
+
 from models.mlp_classifier import MLPClassifierTorch, MLPConfig
 from data.dataloader import get_data
 
 # --- KONFIGURASI ---
 # Pastikan path ini mengarah ke folder output terbaru Anda
-run_folder = 'outputs/20260127_161636' 
+run_folder = 'outputs/20260330_153344' 
 ckpt_path = os.path.join(run_folder, 'checkpoints', 'mlp_final.pt')
 data_root = '.' 
 
@@ -110,6 +114,17 @@ acc = (all_preds == y_test).mean()
 # Kita pakai cara simple sklearn untuk report akhir
 from sklearn.metrics import f1_score
 macro_f1 = f1_score(y_test, all_preds, average='macro')
+
+# --- TAMBAHAN BARU: Panggil fungsi visualisasi ---
+# Kita gunakan run_folder untuk mendapatkan direktori checkpoint
+# Ambil direktori checkpoints dari run_folder
+ckpt_dir = os.path.join(run_folder, 'checkpoints')
+os.makedirs(ckpt_dir, exist_ok=True) # Pastikan direktori ada
+
+print("Membuat confusion matrix...")
+plot_confusion_matrix(y_test, all_preds, ckpt_dir)
+print(f"Confusion matrix disimpan di {ckpt_dir}/confusion_matrix.png")
+# --- AKHIR TAMBAHAN ---
 
 print("-" * 30)
 print("HASIL EVALUASI AKHIR")

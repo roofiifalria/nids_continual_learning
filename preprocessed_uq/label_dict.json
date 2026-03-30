@@ -1,0 +1,22 @@
+{
+  "Benign": 0,
+  "DDoS": 1,
+  "DoS": 2,
+  "Scanning": 3,
+  "Reconnaissance": 4,
+  "XSS": 5,
+  "Brute Force": 6,
+  "Injection": 7,
+  "Botnet": 8,
+  "Infiltration": 9,
+  "Backdoor": 10,
+  "Exploits": 11,
+  "Fuzzers": 12,
+  "Generic": 13,
+  "MITM": 14,
+  "Ransomware": 15,
+  "Shellcode": 16,
+  "Analysis": 17,
+  "Theft": 18,
+  "Worms": 19
+}

@@ -29,6 +29,33 @@ import numpy as np
 import pandas as pd
 
 
+# --------------------------- Global Variables ---------------------------
+GLOBAL_FEATURES = [
+    "IN_BYTES", "IN_PKTS", "OUT_BYTES", "OUT_PKTS",
+    "SRC_TO_DST_SECOND_BYTES", "DST_TO_SRC_SECOND_BYTES",
+    "FLOW_DURATION_MILLISECONDS", "TCP_FLAGS",
+    "LONGEST_FLOW_PKT", "SHORTEST_FLOW_PKT"
+]
+
+ATTACK_MAPPING = {
+    "Benign": "Benign", "DDoS": "DDoS", "ddos": "DDoS",
+    "DDOS attack-HOIC": "DDoS", "DDoS attacks-LOIC-HTTP": "DDoS",
+    "DDOS attack-LOIC-UDP": "DDoS", "DoS": "DoS", "dos": "DoS",
+    "DoS attacks-Hulk": "DoS", "DoS attacks-GoldenEye": "DoS",
+    "DoS attacks-SlowHTTPTest": "DoS", "DoS attacks-Slowloris": "DoS",
+    "scanning": "Scanning", "Reconnaissance": "Reconnaissance",
+    "xss": "XSS", "Brute Force -XSS": "XSS", "password": "Brute Force",
+    "Brute Force": "Brute Force", "SSH-Bruteforce": "Brute Force",
+    "FTP-BruteForce": "Brute Force", "Brute Force -Web": "Brute Force",
+    "injection": "Injection", "Bot": "Botnet", "Infilteration": "Infiltration",
+    "Backdoor": "Backdoor", "backdoor": "Backdoor", "Exploits": "Exploits",
+    "Fuzzers": "Fuzzers", "Generic": "Generic", "mitm": "MITM",
+    "ransomware": "Ransomware", "Shellcode": "Shellcode",
+    "Analysis": "Analysis", "Theft": "Theft", "Worms": "Worms"
+}
+# --------------------------- End Global Variables ---------------------------
+
+
 # --------------------------- I/O helpers ---------------------------
 
 def list_csvs(path: str) -> List[str]:
@@ -69,6 +96,13 @@ def pass1_scan(
 
     for fp in files:
         for chunk in pd.read_csv(fp, chunksize=chunksize, low_memory=True):
+            # --- Tambahkan kode filtering di sini ---
+            chunk[class_col] = chunk[class_col].map(ATTACK_MAPPING)
+            chunk = chunk.dropna(subset=[class_col])
+            columns_to_keep = GLOBAL_FEATURES + [class_col]
+            chunk = chunk[columns_to_keep]
+            # --- Akhir tambahan kode ---
+            
             if class_col not in chunk.columns:
                 raise KeyError(f"'{class_col}' not found in columns for {fp}")
 
@@ -200,8 +234,15 @@ def pass2_transform_and_write(
 
     for fp in files:
         for chunk in pd.read_csv(fp, chunksize=chunksize, low_memory=True):
+            # --- Tambahkan kode filtering di sini ---
             if class_col not in chunk.columns:
                 continue
+            
+            chunk[class_col] = chunk[class_col].map(ATTACK_MAPPING)
+            chunk = chunk.dropna(subset=[class_col])
+            columns_to_keep = GLOBAL_FEATURES + [class_col]
+            chunk = chunk[columns_to_keep]
+            # --- Akhir tambahan kode ---
 
             y = chunk[class_col].astype(str)
 
